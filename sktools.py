@@ -20,10 +20,10 @@ app = Flask('')
 admin_state = {}
 
 # ──────────────────────────────────────────────
-# ডাটাবেজ সেটিংস (সম্পূর্ণ নতুন সলিড ডাটাবেজ)
+# ডাটাবেজ সেটিংস
 # ──────────────────────────────────────────────
 def init_db():
-    conn = sqlite3.connect('sk_tools_final_v3.db')
+    conn = sqlite3.connect('sk_tools_final_v4.db')
     cursor = conn.cursor()
     
     # ১. প্রোডাক্ট টেবিল
@@ -86,7 +86,7 @@ init_db()
 # Helper Functions
 # ──────────────────────────────────────────────
 def get_setting(key):
-    conn = sqlite3.connect('sk_tools_final_v3.db')
+    conn = sqlite3.connect('sk_tools_final_v4.db')
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM settings WHERE key=?", (key,))
     res = cursor.fetchone()
@@ -122,7 +122,7 @@ def cmd_start(msg):
     chat_id = msg.chat.id
     markup = InlineKeyboardMarkup(row_width=1)
     
-    conn = sqlite3.connect('sk_tools_final_v3.db')
+    conn = sqlite3.connect('sk_tools_final_v4.db')
     cursor = conn.cursor()
     cursor.execute("SELECT id, name FROM products")
     products = cursor.fetchall()
@@ -132,7 +132,7 @@ def cmd_start(msg):
         for p in products:
             markup.add(InlineKeyboardButton(f"🖥️ {p[1]}", callback_data=f"usr_view_{p[0]}"))
     else:
-        bot.send_message(chat_id, "🛒 আমাদের শপে বর্তমানে কোনো সফটওয়্যার উপলব্ধ নেই।")
+        bot.send_message(chat_id, "🛒 আমাদের শপে বর্তমানে কোনোソフトওয়্যার উপলব্ধ নেই।")
         if chat_id == ADMIN_ID:
             markup.add(InlineKeyboardButton("⭐ ওপেন অ্যাডমিন প্যানেল ⭐", callback_data="adm_panel"))
             bot.send_message(chat_id, "🔧 অ্যাডমিন প্যানেল অ্যাক্সেস করুন:", reply_markup=markup)
@@ -187,9 +187,9 @@ def admin_callbacks(call):
         admin_state[chat_id] = {"step": "change_wallet"}
 
     elif data == "adm_list_products":
-        conn = sqlite3.connect('sk_tools_final_v3.db')
+        conn = sqlite3.connect('sk_tools_final_v4.db')
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name BLOCK FROM products")
+        cursor.execute("SELECT id, name FROM products")
         prods = cursor.fetchall()
         conn.close()
         
@@ -201,7 +201,7 @@ def admin_callbacks(call):
 
     elif data.startswith("adm_del_"):
         p_id = data.replace("adm_del_", "")
-        conn = sqlite3.connect('sk_tools_final_v3.db')
+        conn = sqlite3.connect('sk_tools_final_v4.db')
         cursor = conn.cursor()
         cursor.execute("DELETE FROM products WHERE id=?", (p_id,))
         cursor.execute("DELETE FROM packages WHERE product_id=?", (p_id,))
@@ -211,7 +211,7 @@ def admin_callbacks(call):
         admin_callbacks(call)
 
     elif data == "adm_sales_report":
-        conn = sqlite3.connect('sk_tools_final_v3.db')
+        conn = sqlite3.connect('sk_tools_final_v4.db')
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*), SUM(price) FROM orders WHERE status='COMPLETED'")
         total_sales, total_earnings = cursor.fetchone()
@@ -234,7 +234,7 @@ def admin_callbacks(call):
         action = parts[1]
         order_id = parts[2]
         
-        conn = sqlite3.connect('sk_tools_final_v3.db')
+        conn = sqlite3.connect('sk_tools_final_v4.db')
         cursor = conn.cursor()
         cursor.execute("SELECT chat_id, product_id, product_name, package_label, status FROM orders WHERE order_id=?", (order_id,))
         order = cursor.fetchone()
@@ -296,7 +296,7 @@ def handle_admin_inputs(msg):
 
     elif step == "add_secret":
         state["secret"] = msg.text.strip()
-        bot.send_message(chat_id, "🎯 এবার এই সফটওয়্যারের জন্য প্যাকেজ যোগ করুন।\n\nপ্রথমে ১ম প্যাকেজের নাম ও মেয়াদ লিখুন।\n*ফরম্যাট:* `মেয়াদের নাম,দিনের সংখ্যা` (যেমন: `৩০ দিন মেয়াদী,30` বা `১৫ দিন মেয়াদী,15`)")
+        bot.send_message(chat_id, "🎯 এবার এই সফটওয়্যার জন্য প্যাকেজ যোগ করুন।\n\nপ্রথমে ১ম প্যাকেজের নাম ও মেয়াদ লিখুন।\n*ফরম্যাট:* `মেয়াদের নাম,দিনের সংখ্যা` (যেমন: `৩০ দিন মেয়াদী,30` বা `১৫ দিন মেয়াদী,15`)")
         state["step"] = "add_pkg_label"
 
     elif step == "add_pkg_label":
@@ -327,7 +327,7 @@ def handle_admin_inputs(msg):
 
     elif step == "change_wallet":
         new_info = msg.text.strip()
-        conn = sqlite3.connect('sk_tools_final_v3.db')
+        conn = sqlite3.connect('sk_tools_final_v4.db')
         cursor = conn.cursor()
         cursor.execute("UPDATE settings SET value=? WHERE key='payment_info'", (new_info,))
         conn.commit()
@@ -335,7 +335,7 @@ def handle_admin_inputs(msg):
         bot.send_message(chat_id, "✅ বিকাশ/নগদ নাম্বার সফলভাবে আপডেট করা হয়েছে।")
         del admin_state[chat_id]
 
-# প্যাকেজ এন্ডিং সেভ (বাটন ফিল্টার ফিক্সড)
+# প্যাকেজ এন্ডিং সেভ
 @bot.callback_query_handler(func=lambda call: call.data in ["p_add_more", "p_save_final"])
 def handle_pkg_buttons(call):
     chat_id = call.message.chat.id
@@ -347,7 +347,7 @@ def handle_pkg_buttons(call):
         bot.edit_message_text("🎯 পরবর্তী প্যাকেজের নাম ও মেয়াদ লিখুন।\n*ফরম্যাট:* `মেয়াদের নাম,দিনের সংখ্যা` (যেমন: `৩ মাস মেয়াদী,90`)", chat_id, call.message.message_id)
         state["step"] = "add_pkg_label"
     elif call.data == "p_save_final":
-        conn = sqlite3.connect('sk_tools_final_v3.db')
+        conn = sqlite3.connect('sk_tools_final_v4.db')
         cursor = conn.cursor()
         cursor.execute("INSERT INTO products (name, download_link, license_api_url, admin_secret) VALUES (?, ?, ?, ?)",
                        (state["name"], state["link"], state["api_url"], state["secret"]))
@@ -372,7 +372,7 @@ def user_callbacks(call):
 
     if data.startswith("usr_view_"):
         p_id = data.replace("usr_view_", "")
-        conn = sqlite3.connect('sk_tools_final_v3.db')
+        conn = sqlite3.connect('sk_tools_final_v4.db')
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM products WHERE id=?", (p_id,))
         p_name = cursor.fetchone()[0]
@@ -389,7 +389,7 @@ def user_callbacks(call):
 
     elif data.startswith("usr_buy_"):
         pkg_id = data.replace("usr_buy_", "")
-        conn = sqlite3.connect('sk_tools_final_v3.db')
+        conn = sqlite3.connect('sk_tools_final_v4.db')
         cursor = conn.cursor()
         cursor.execute("SELECT product_id, label, days, price FROM packages WHERE id=?", (pkg_id,))
         p_id, label, days, price = cursor.fetchone()
@@ -399,7 +399,7 @@ def user_callbacks(call):
         
         order_id = f"SK{random.randint(10000, 99999)}"
         
-        conn = sqlite3.connect('sk_tools_final_v3.db')
+        conn = sqlite3.connect('sk_tools_final_v4.db')
         cursor = conn.cursor()
         cursor.execute("INSERT INTO orders (order_id, chat_id, user_name, product_id, product_name, package_label, days, price, status, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_TXID', ?)",
                        (order_id, chat_id, call.from_user.first_name, p_id, p_name, label, days, price, datetime.now().strftime('%Y-%m-%d %H:%M')))
@@ -422,7 +422,7 @@ def handle_user_txid(msg):
     txid = msg.text.strip().upper()
     order_id = admin_state[chat_id]["order_id"]
     
-    conn = sqlite3.connect('sk_tools_final_v3.db')
+    conn = sqlite3.connect('sk_tools_final_v4.db')
     cursor = conn.cursor()
     cursor.execute("UPDATE orders SET txid=?, status='PENDING_APPROVAL' WHERE order_id=?", (txid, order_id))
     cursor.execute("SELECT product_name, package_label, price FROM orders WHERE order_id=?", (order_id,))
@@ -444,7 +444,10 @@ def process_user_device_id(msg, order_id):
     chat_id = msg.chat.id
     device_id = msg.text.strip().upper()
 
-    conn = sqlite3.connect('sk_tools_final_v3.db')
+    conn = sqlite3.connect('sk_tools_final_v4.db')
     cursor = conn.cursor()
     cursor.execute("SELECT product_id, days, status FROM orders WHERE order_id=?", (order_id,))
-    order = cursor.fetc
+    order = cursor.fetchone()
+
+    if not order or order[2] != "PAID":
+        bot.
