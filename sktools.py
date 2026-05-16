@@ -1,5 +1,5 @@
 # ============================================================
-# SK Tools Shop — Manual TxID Payment & Multi-Package Bot (FIXED)
+# SK Tools Shop — Manual TxID Payment & Multi-Package Bot
 # ============================================================
 import telebot
 import requests
@@ -7,6 +7,7 @@ import random
 import string
 import sqlite3
 import threading
+import os
 from flask import Flask
 from datetime import datetime, timedelta
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -23,10 +24,9 @@ admin_state = {}
 # ডাটাবেজ সেটিংস
 # ──────────────────────────────────────────────
 def init_db():
-    conn = sqlite3.connect('sk_tools_final_v4.db')
+    conn = sqlite3.connect('sk_tools_final_v5.db')
     cursor = conn.cursor()
-    
-    # ১. প্রোডাক্ট টেবিল
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,8 +36,7 @@ def init_db():
             admin_secret TEXT
         )
     ''')
-    
-    # ২. প্যাকেজ টেবিল
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS packages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,8 +47,7 @@ def init_db():
             FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
         )
     ''')
-    
-    # ৩. অর্ডার টেবিল
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS orders (
             order_id TEXT PRIMARY KEY,
@@ -67,15 +65,14 @@ def init_db():
             timestamp TEXT
         )
     ''')
-    
-    # ৪. পেমেন্ট ওয়ালেট সেটিংস টেবিল
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
         )
     ''')
-    
+
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('payment_info', 'বিকাশ পার্সোনাল: ০১৭XXXXXXXX\nনগদ পার্সোনাল: ০১৮XXXXXXXX\n\nটাকা পাঠানোর পর ট্রানজেকশন আইডি (TxID) নিচে দিন।')")
     conn.commit()
     conn.close()
@@ -86,7 +83,7 @@ init_db()
 # Helper Functions
 # ──────────────────────────────────────────────
 def get_setting(key):
-    conn = sqlite3.connect('sk_tools_final_v4.db')
+    conn = sqlite3.connect('sk_tools_final_v5.db')
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM settings WHERE key=?", (key,))
     res = cursor.fetchone()
@@ -97,13 +94,395 @@ def call_custom_license_api(api_url, secret, device_id, days):
     chars = string.ascii_uppercase + string.digits
     key = f"SK-{''.join(random.choices(chars, k=5))}-{''.join(random.choices(chars, k=5))}"
     expiry = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d')
-    
+
     data = {
         'action': 'add',
         'admin_secret': secret,
         'key': key,
         'device': device_id,
         'expiry': expiry
+    }
+    try:
+        r = requests.post(api_url, data=data, timeout=15)
+        res = r.json()
+        if res.get('status') == 'success':
+            return res.get('key', key)
+    except:
+        return key
+    return key
+
+# ──────────────────────────────────────────────
+# ইউজার ভিউ (/start মেনু)
+# ──────────────────────────────────────────────
+@bot.message_handler(commands=['start'])
+def cmd_start(msg):
+    chat_id = msg.chat.id
+    markup = InlineKeyboardMarkup(row_width=1)
+
+    conn = sqlite3.connect('sk_tools_final_v5.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name FROM products")
+    products = cursor.fetchall()
+    conn.close()
+
+    if products:
+        for p in products:
+            markup.add(InlineKeyboardButton(f"🖥️ {p[1]}", callback_data=f"usr_view_{p[0]}"))
+    else:
+        if chat_id == ADMIN_ID:
+            markup.add(InlineKeyboardButton("⭐ ওপেন অ্যাডমিন প্যানেল ⭐", callback_data="adm_panel"))
+            bot.send_message(chat_id, "🛒 শপে কোনো সফটওয়্যার নেই। অ্যাডমিন প্যানেল থেকে যোগ করুন:", reply_markup=markup)
+        else:
+            bot.send_message(chat_id, "🛒 আমাদের শপে বর্তমানে কোনো সফটওয়্যার উপলব্ধ নেই।")
+        return
+
+    if chat_id == ADMIN_ID:
+        markup.add(InlineKeyboardButton("⭐ ওপেন অ্যাডমিন প্যানেল ⭐", callback_data="adm_panel"))
+
+    bot.send_message(chat_id,
+        f"👋 *স্বাগতম {msg.from_user.first_name}!*\n\n"
+        f"🚀 *SK Tools Shop*-এ আপনাকে স্বাগতম। আপনার পছন্দের অ্যাপটি কিনতে নিচে ক্লিক করুন:",
+        parse_mode='Markdown', reply_markup=markup)
+
+# ──────────────────────────────────────────────
+# অ্যাডমিন প্যানেল লজিক
+# ──────────────────────────────────────────────
+@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_"))
+def admin_callbacks(call):
+    chat_id = call.message.chat.id
+    if chat_id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ আপনার অ্যাক্সেস নেই!")
+        return
+
+    data = call.data
+
+    if data == "adm_panel":
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            InlineKeyboardButton("➕ নতুন সফটওয়্যার অ্যাড করুন", callback_data="adm_add_product"),
+            InlineKeyboardButton("📦 প্রোডাক্ট লিস্ট ও ডিলিট", callback_data="adm_list_products"),
+            InlineKeyboardButton("📊 সেলস রিপোর্ট ও ইউজার", callback_data="adm_sales_report"),
+            InlineKeyboardButton("⚙️ বিকাশ/নগদ নাম্বার সেটিংস", callback_data="adm_wallet_settings"),
+            InlineKeyboardButton("⬅️ ইউজার মেনু", callback_data="adm_back_to_user")
+        )
+        bot.edit_message_text("🛠️ *SK Tools Shop Admin Panel*:", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=markup)
+
+    elif data == "adm_back_to_user":
+        bot.delete_message(chat_id, call.message.message_id)
+        cmd_start(call.message)
+
+    elif data == "adm_add_product":
+        bot.edit_message_text("📝 সফটওয়্যারের *নাম (Name)* লিখুন:", chat_id, call.message.message_id, parse_mode='Markdown')
+        admin_state[chat_id] = {"step": "add_name", "packages": []}
+
+    elif data == "adm_wallet_settings":
+        current_info = get_setting("payment_info")
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("📝 নাম্বার ও নিয়ম আপডেট করুন", callback_data="adm_change_wallet"))
+        markup.add(InlineKeyboardButton("⬅️ ব্যাক", callback_data="adm_panel"))
+        bot.edit_message_text(f"⚙️ *বর্তমান পেমেন্ট তথ্য:*\n\n{current_info}", chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+    elif data == "adm_change_wallet":
+        bot.edit_message_text("✍️ আপনার নতুন বিকাশ/নগদ নাম্বার এবং কাস্টমারদের জন্য নিয়মটি লিখে পাঠান:", chat_id, call.message.message_id)
+        admin_state[chat_id] = {"step": "change_wallet"}
+
+    elif data == "adm_list_products":
+        conn = sqlite3.connect('sk_tools_final_v5.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name FROM products")
+        prods = cursor.fetchall()
+        conn.close()
+
+        markup = InlineKeyboardMarkup(row_width=1)
+        if prods:
+            for p in prods:
+                markup.add(InlineKeyboardButton(f"❌ ডিলিট: {p[1]}", callback_data=f"adm_del_{p[0]}"))
+        else:
+            markup.add(InlineKeyboardButton("(কোনো প্রোডাক্ট নেই)", callback_data="adm_panel"))
+        markup.add(InlineKeyboardButton("⬅️ ব্যাক", callback_data="adm_panel"))
+        bot.edit_message_text("📦 বর্তমানে লিস্টেড প্রোডাক্টসমূহ:", chat_id, call.message.message_id, reply_markup=markup)
+
+    elif data.startswith("adm_del_"):
+        p_id = data.replace("adm_del_", "")
+        conn = sqlite3.connect('sk_tools_final_v5.db')
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM products WHERE id=?", (p_id,))
+        cursor.execute("DELETE FROM packages WHERE product_id=?", (p_id,))
+        conn.commit()
+        conn.close()
+        bot.answer_callback_query(call.id, "✅ প্রোডাক্টটি ডিলিট করা হয়েছে!")
+
+        # Re-trigger list view
+        conn = sqlite3.connect('sk_tools_final_v5.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name FROM products")
+        prods = cursor.fetchall()
+        conn.close()
+
+        markup = InlineKeyboardMarkup(row_width=1)
+        if prods:
+            for p in prods:
+                markup.add(InlineKeyboardButton(f"❌ ডিলিট: {p[1]}", callback_data=f"adm_del_{p[0]}"))
+        else:
+            markup.add(InlineKeyboardButton("(কোনো প্রোডাক্ট নেই)", callback_data="adm_panel"))
+        markup.add(InlineKeyboardButton("⬅️ ব্যাক", callback_data="adm_panel"))
+        bot.edit_message_text("📦 বর্তমানে লিস্টেড প্রোডাক্টসমূহ:", chat_id, call.message.message_id, reply_markup=markup)
+        return
+
+    elif data == "adm_sales_report":
+        conn = sqlite3.connect('sk_tools_final_v5.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*), SUM(price) FROM orders WHERE status='COMPLETED'")
+        total_sales, total_earnings = cursor.fetchone()
+        total_earnings = total_earnings if total_earnings else 0
+
+        cursor.execute("SELECT user_name, product_name, price, timestamp FROM orders WHERE status='COMPLETED' ORDER BY timestamp DESC LIMIT 5")
+        recent_orders = cursor.fetchall()
+        conn.close()
+
+        report_text = f"📊 *বিক্রয় রিপোর্ট:*\n\n💰 মোট আয়: `{total_earnings}` টাকা\n📦 মোট বিক্রি: `{total_sales}` টি লাইসেন্স\n\n📋 *সর্বশেষ ৫টি ক্রয়:*\n"
+        for o in recent_orders:
+            report_text += f"👤 {o[0]} ➔ {o[1]} (`{o[2]} tk`) — {o[3]}\n"
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("⬅️ ব্যাক", callback_data="adm_panel"))
+        bot.edit_message_text(report_text, chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=markup)
+
+    elif data.startswith("adm_approve_") or data.startswith("adm_reject_"):
+        parts = data.split("_")
+        action = parts[1]
+        order_id = parts[2]
+
+        conn = sqlite3.connect('sk_tools_final_v5.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT chat_id, product_id, product_name, package_label, status FROM orders WHERE order_id=?", (order_id,))
+        order = cursor.fetchone()
+
+        if not order or order[4] != "PENDING_APPROVAL":
+            bot.answer_callback_query(call.id, "⚠️ এই অর্ডারটি ইতিমধ্যে প্রসেস করা হয়েছে।")
+            conn.close()
+            return
+
+        usr_chat_id, p_id, p_name, pkg_label, _ = order
+
+        if action == "approve":
+            cursor.execute("UPDATE orders SET status='PAID' WHERE order_id=?", (order_id,))
+            cursor.execute("SELECT download_link FROM products WHERE id=?", (p_id,))
+            link_res = cursor.fetchone()
+            download_link = link_res[0] if link_res else ""
+            conn.commit()
+            conn.close()
+
+            markup_usr = InlineKeyboardMarkup()
+            if download_link:
+                markup_usr.add(InlineKeyboardButton("📥 Download Software", url=download_link))
+            markup_usr.add(InlineKeyboardButton("📱 Submit Device ID", callback_data=f"dev_{order_id}"))
+
+            bot.send_message(usr_chat_id,
+                f"✅ *আপনার পেমেন্ট ভেরিফাইড হয়েছে!*\n\n"
+                f"🚀 প্রোডাক্ট: *{p_name} ({pkg_label})*\n\n"
+                f"📌 নিচে থেকে সফটওয়্যারটি ডাউনলোড করে ওপেন করুন এবং প্রাপ্ত *Device ID* টি সাবমিট করুন।",
+                parse_mode='Markdown', reply_markup=markup_usr)
+            bot.edit_message_text(f"✅ অর্ডার `{order_id}` অ্যাপ্রুভ করা হয়েছে!", chat_id, call.message.message_id, parse_mode='Markdown')
+        else:
+            cursor.execute("UPDATE orders SET status='REJECTED' WHERE order_id=?", (order_id,))
+            conn.commit()
+            conn.close()
+            bot.send_message(usr_chat_id, "❌ দুঃখিত, আপনার দেওয়া ট্রানজেকশন আইডিটি ম্যাচ করেনি। পেমেন্ট বাতিল করা হয়েছে।")
+            bot.edit_message_text(f"❌ অর্ডার `{order_id}` রিজেক্ট করা হয়েছে!", chat_id, call.message.message_id, parse_mode='Markdown')
+
+    bot.answer_callback_query(call.id)
+
+# ──────────────────────────────────────────────
+# অ্যাডমিন টেক্সট ইনপুট হ্যান্ডলিং
+# ──────────────────────────────────────────────
+@bot.message_handler(func=lambda msg: msg.chat.id == ADMIN_ID and msg.chat.id in admin_state)
+def handle_admin_inputs(msg):
+    chat_id = msg.chat.id
+    state = admin_state[chat_id]
+    step = state.get("step")
+
+    if step == "add_name":
+        state["name"] = msg.text.strip()
+        bot.send_message(chat_id, "📥 সফটওয়্যারের ডিরেক্ট *Download Link* দিন:", parse_mode='Markdown')
+        state["step"] = "add_link"
+
+    elif step == "add_link":
+        state["link"] = msg.text.strip()
+        bot.send_message(chat_id, "🔗 এই সফটওয়্যারের জন্য *License API URL* দিন:", parse_mode='Markdown')
+        state["step"] = "add_api_url"
+
+    elif step == "add_api_url":
+        state["api_url"] = msg.text.strip()
+        bot.send_message(chat_id, "🔑 এই লাইসেন্স API এর *Admin Secret Key* দিন:", parse_mode='Markdown')
+        state["step"] = "add_secret"
+
+    elif step == "add_secret":
+        state["secret"] = msg.text.strip()
+        bot.send_message(chat_id,
+            "🎯 এবার প্যাকেজ যোগ করুন।\n\n"
+            "*ফরম্যাট:* `মেয়াদের নাম,দিনের সংখ্যা`\n"
+            "উদাহরণ: `৩০ দিন মেয়াদী,30`", parse_mode='Markdown')
+        state["step"] = "add_pkg_label"
+
+    elif step == "add_pkg_label":
+        try:
+            label, days = msg.text.split(",")
+            state["current_pkg_label"] = label.strip()
+            state["current_pkg_days"] = int(days.strip())
+            bot.send_message(chat_id, f"💰 *'{label.strip()}'* প্যাকেজের দাম কত? (শুধু সংখ্যা)", parse_mode='Markdown')
+            state["step"] = "add_pkg_price"
+        except:
+            bot.send_message(chat_id, "❌ ফরম্যাট ভুল! আবার লিখুন। উদাহরণ: `৩০ দিন মেয়াদী,30`", parse_mode='Markdown')
+
+    elif step == "add_pkg_price":
+        if not msg.text.strip().isdigit():
+            bot.send_message(chat_id, "❌ শুধুমাত্র সংখ্যা লিখুন। দাম:")
+            return
+        price = int(msg.text.strip())
+        state["packages"].append({
+            "label": state["current_pkg_label"],
+            "days": state["current_pkg_days"],
+            "price": price
+        })
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("➕ আরও প্যাকেজ যোগ করুন", callback_data="p_add_more"))
+        markup.add(InlineKeyboardButton("✅ প্রোডাক্ট সেভ করুন", callback_data="p_save_final"))
+        bot.send_message(chat_id,
+            f"✅ প্যাকেজ যুক্ত: {state['current_pkg_label']} = {price} টাকা\n\nআরও প্যাকেজ যোগ করবেন?",
+            reply_markup=markup)
+
+    elif step == "change_wallet":
+        new_info = msg.text.strip()
+        conn = sqlite3.connect('sk_tools_final_v5.db')
+        cursor = conn.cursor()
+        cursor.execute("UPDATE settings SET value=? WHERE key='payment_info'", (new_info,))
+        conn.commit()
+        conn.close()
+        bot.send_message(chat_id, "✅ বিকাশ/নগদ তথ্য সফলভাবে আপডেট হয়েছে।")
+        del admin_state[chat_id]
+
+# প্যাকেজ সেভ বাটন
+@bot.callback_query_handler(func=lambda call: call.data in ["p_add_more", "p_save_final"])
+def handle_pkg_buttons(call):
+    chat_id = call.message.chat.id
+    if chat_id != ADMIN_ID or chat_id not in admin_state:
+        return
+
+    state = admin_state[chat_id]
+
+    if call.data == "p_add_more":
+        bot.edit_message_text(
+            "🎯 পরবর্তী প্যাকেজের নাম ও মেয়াদ লিখুন।\n*ফরম্যাট:* `মেয়াদের নাম,দিনের সংখ্যা`",
+            chat_id, call.message.message_id, parse_mode='Markdown')
+        state["step"] = "add_pkg_label"
+
+    elif call.data == "p_save_final":
+        conn = sqlite3.connect('sk_tools_final_v5.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO products (name, download_link, license_api_url, admin_secret) VALUES (?, ?, ?, ?)",
+            (state["name"], state["link"], state["api_url"], state["secret"]))
+        p_id = cursor.lastrowid
+
+        for pkg in state["packages"]:
+            cursor.execute(
+                "INSERT INTO packages (product_id, label, days, price) VALUES (?, ?, ?, ?)",
+                (p_id, pkg["label"], pkg["days"], pkg["price"]))
+        conn.commit()
+        conn.close()
+
+        bot.edit_message_text(
+            f"🎉 *'{state['name']}' সফলভাবে {len(state['packages'])}টি প্যাকেজসহ লিস্ট করা হয়েছে!*",
+            chat_id, call.message.message_id, parse_mode='Markdown')
+        del admin_state[chat_id]
+
+    bot.answer_callback_query(call.id)
+
+# ──────────────────────────────────────────────
+# ইউজার পারচেজ ও ম্যানুয়াল পেমেন্ট লজিক
+# ──────────────────────────────────────────────
+@bot.callback_query_handler(func=lambda call: call.data.startswith("usr_") or call.data.startswith("dev_"))
+def user_callbacks(call):
+    chat_id = call.message.chat.id
+    data = call.data
+
+    if data.startswith("usr_view_"):
+        p_id = data.replace("usr_view_", "")
+        conn = sqlite3.connect('sk_tools_final_v5.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM products WHERE id=?", (p_id,))
+        row = cursor.fetchone()
+        if not row:
+            bot.answer_callback_query(call.id, "প্রোডাক্ট পাওয়া যায়নি!")
+            conn.close()
+            return
+        p_name = row[0]
+        cursor.execute("SELECT id, label, price FROM packages WHERE product_id=?", (p_id,))
+        pkgs = cursor.fetchall()
+        conn.close()
+
+        markup = InlineKeyboardMarkup(row_width=1)
+        for pkg in pkgs:
+            markup.add(InlineKeyboardButton(f"💳 {pkg[1]} — {pkg[2]} টাকা", callback_data=f"usr_buy_{pkg[0]}"))
+        markup.add(InlineKeyboardButton("⬅️ মেইন মেনু", callback_data="usr_main"))
+
+        bot.edit_message_text(
+            f"📦 *{p_name}* এর জন্য প্যাকেজ সিলেক্ট করুন:",
+            chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=markup)
+
+    elif data == "usr_main":
+        bot.delete_message(chat_id, call.message.message_id)
+        cmd_start(call.message)
+
+    elif data.startswith("usr_buy_"):
+        pkg_id = data.replace("usr_buy_", "")
+        conn = sqlite3.connect('sk_tools_final_v5.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT product_id, label, days, price FROM packages WHERE id=?", (pkg_id,))
+        row = cursor.fetchone()
+        if not row:
+            bot.answer_callback_query(call.id, "প্যাকেজ পাওয়া যায়নি!")
+            conn.close()
+            return
+        p_id, label, days, price = row
+        cursor.execute("SELECT name FROM products WHERE id=?", (p_id,))
+        p_name = cursor.fetchone()[0]
+        conn.close()
+
+        order_id = f"SK{random.randint(10000, 99999)}"
+
+        conn = sqlite3.connect('sk_tools_final_v5.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO orders (order_id, chat_id, user_name, product_id, product_name, package_label, days, price, status, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_TXID', ?)",
+            (order_id, chat_id, call.from_user.first_name, p_id, p_name, label, days, price, datetime.now().strftime('%Y-%m-%d %H:%M')))
+        conn.commit()
+        conn.close()
+
+        pmnt_info = get_setting("payment_info")
+        bot.edit_message_text(
+            f"🛒 *অর্ডার সামারি:*\n"
+            f"🖥️ সফটওয়্যার: {p_name}\n"
+            f"🎯 প্যাকেজ: {label}\n"
+            f"💰 মূল্য: {price} টাকা\n\n"
+            f"💵 *পেমেন্ট করার নিয়ম:*\n{pmnt_info}\n\n"
+            f"✅ পেমেন্ট করার পর নিচে TxID লিখে পাঠান:",
+            chat_id, call.message.message_id, parse_mode='Markdown')
+
+        admin_state[chat_id] = {"step": "submit_txid", "order_id": order_id}
+
+    elif data.startswith("dev_"):
+        order_id = data.replace("dev_", "")
+        msg = bot.send_message(chat_id, "📱 আপনার অ্যাপ থেকে কপি করা *Device ID* টি এখানে পাঠান:", parse_mode='Markdown')
+        bot.register_next_step_handler(msg, process_user_device_id, order_id)
+
+    bot.answer_callback_query(call.id)
+
+# ──────────────────────────────────────────────
+# ইউজার TxID সাবমিট
+# ─────────────────        'expiry': expiry
     }
     try:
         r = requests.post(api_url, data=data, timeout=15)
