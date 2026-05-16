@@ -17,7 +17,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = "8944774594:AAG2CtEfzZWN0dPC-0UhsijjApYpVAZS_qw"
+BOT_TOKEN = "8944774594:AAHa9pSUcazJBxpk8_ELMTRyteKHL9tf7wc"
 ADMIN_ID  = 7865823978
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
